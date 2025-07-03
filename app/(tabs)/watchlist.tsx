@@ -1,5 +1,3 @@
-// app/(tabs)/watchlist.tsx - REDESIGNED (Calm & Smooth UI)
-
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';

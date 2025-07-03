@@ -1,5 +1,3 @@
-// app/stock/[symbol].tsx - Complete Updated Version
-
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';

@@ -1,5 +1,3 @@
-// app/watchlist/[id].tsx - Updated with Rename Bottom Sheet
-
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
