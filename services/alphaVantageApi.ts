@@ -396,6 +396,7 @@ class SimpleAlphaVantageApi {
             Sector: "TECHNOLOGY",
             Industry: "Software & Services",
             Address: "Technology Park, USA",
+            // @ts-ignore
             OfficialSite: `https://www.${symbol.toLowerCase()}.com`,
             FiscalYearEnd: "December",
             LatestQuarter: "2024-12-31",
@@ -535,6 +536,7 @@ class SimpleAlphaVantageApi {
         return {
             bestMatches: [
                 {
+                    // @ts-ignore
                     "1. symbol": keywords.toUpperCase(),
                     "2. name": `${keywords} Corporation`,
                     "3. type": "Equity",

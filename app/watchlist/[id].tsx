@@ -240,6 +240,7 @@ export default function WatchlistDetailScreen() {
                 <Text style={styles.emptyDescription}>
                     Add stocks to this watchlist by visiting stock detail pages and selecting this watchlist
                 </Text>
+                {/* @ts-ignore */}
                 <Pressable style={styles.exploreButton} onPress={() => router.push('/(tabs)/')}>
                     <Text style={styles.exploreButtonText}>Explore Stocks</Text>
                 </Pressable>

@@ -154,7 +154,7 @@ export default function WatchlistScreen() {
                 </View>
                 <Text style={styles.emptyTitle}>Create your first watchlist</Text>
                 <Text style={styles.emptyDescription}>
-                    Keep track of stocks you're interested in by organizing them into watchlists
+                    Keep track of stocks you&apos;re interested in by organizing them into watchlists
                 </Text>
                 <Pressable style={styles.createFirstButton} onPress={handleCreateWatchlist}>
                     <Ionicons name="add" size={18} color="#FFFFFF" />

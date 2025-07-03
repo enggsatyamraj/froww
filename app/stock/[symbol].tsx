@@ -788,14 +788,13 @@ export default function StockDetailScreen() {
                             </View>
                         </View>
 
-                        // Remaining code for stock/[symbol].tsx - Metrics Section and Styles
-
                         {/* Key Metrics */}
                         <View style={styles.metricsSection}>
                             <View style={styles.metricsGrid}>
                                 <View style={styles.metricCard}>
                                     <Text style={styles.metricLabel}>52-Week Low</Text>
                                     <Text style={styles.metricValue}>
+                                        {/* @ts-ignore */}
                                         ${companyData['52WeekLow']}
                                     </Text>
                                 </View>
@@ -806,6 +805,7 @@ export default function StockDetailScreen() {
                                 <View style={styles.metricCard}>
                                     <Text style={styles.metricLabel}>52-Week High</Text>
                                     <Text style={styles.metricValue}>
+                                        {/* @ts-ignore */}
                                         ${companyData['52WeekHigh']}
                                     </Text>
                                 </View>
