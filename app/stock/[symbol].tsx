@@ -62,8 +62,8 @@ export default function StockDetailScreen() {
 
             console.log('✅ Basic stock data loaded successfully');
 
-            // Load initial chart data
-            await loadChartData('1D');
+            // Load initial chart data with 1W instead of 1D
+            await loadChartData('1W'); // Changed from '1D'
 
         } catch (err) {
             console.error('❌ Error loading stock data:', err);
@@ -118,11 +118,12 @@ export default function StockDetailScreen() {
         }
     };
 
+
     const generateFallbackChartData = (period: TimePeriod) => {
         const data = [];
         const now = new Date();
-        let pointCount = 20;
-        let intervalMinutes = 15;
+        let pointCount = 25; // Changed default from 20 to 25 (1W default)
+        let intervalMinutes = 60 * 4; // Changed default from 15 to 240 (1W default)
 
         // Adjust data points based on period
         switch (period) {
