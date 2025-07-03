@@ -1,4 +1,4 @@
-// components/WatchlistBottomSheet.tsx
+// components/WatchlistBottomSheet.tsx - Updated with Done button in header
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { forwardRef, useImperativeHandle, useState } from 'react';
@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import ActionSheet, { ActionSheetRef, ScrollView } from 'react-native-actions-sheet';
 import { WatchlistItem, watchlistStorage } from '../services/watchlistStorage';
-import { Button } from './ui/Button';
 
 interface WatchlistDisplayItem extends WatchlistItem {
     isSelected: boolean;
@@ -23,6 +22,7 @@ interface WatchlistDisplayItem extends WatchlistItem {
 interface WatchlistBottomSheetProps {
     onAddToWatchlist: (watchlistIds: string[], stockSymbol: string) => void;
     stockSymbol: string;
+    isCreationOnly?: boolean; // New prop to indicate creation-only mode
 }
 
 export interface WatchlistBottomSheetRef {
@@ -30,26 +30,26 @@ export interface WatchlistBottomSheetRef {
     hide: () => void;
 }
 
-const WatchlistBottomSheet = forwardRef<WatchlistBottomSheetRef, WatchlistBottomSheetProps>(
-    ({ onAddToWatchlist, stockSymbol }, ref) => {
+export const WatchlistBottomSheet = forwardRef<WatchlistBottomSheetRef, WatchlistBottomSheetProps>(
+    ({ onAddToWatchlist, stockSymbol, isCreationOnly = false }, ref) => {
         const actionSheetRef = React.useRef<ActionSheetRef>(null);
         const [watchlists, setWatchlists] = useState<WatchlistDisplayItem[]>([]);
-        const [showCreateNew, setShowCreateNew] = useState(false);
         const [newWatchlistName, setNewWatchlistName] = useState('');
         const [loading, setLoading] = useState(false);
         const [creating, setCreating] = useState(false);
+        const [nameError, setNameError] = useState<string | null>(null);
 
         useImperativeHandle(ref, () => ({
             show: () => {
                 loadWatchlists();
-                setShowCreateNew(false);
                 setNewWatchlistName('');
+                setNameError(null);
                 actionSheetRef.current?.show();
             },
             hide: () => {
                 actionSheetRef.current?.hide();
-                setShowCreateNew(false);
                 setNewWatchlistName('');
+                setNameError(null);
             },
         }));
 
@@ -58,14 +58,24 @@ const WatchlistBottomSheet = forwardRef<WatchlistBottomSheetRef, WatchlistBottom
                 setLoading(true);
                 const allWatchlists = await watchlistStorage.getWatchlists();
 
-                // Check which watchlists already contain this stock
-                const stockWatchlists = await watchlistStorage.getWatchlistsForStock(stockSymbol);
-                const stockWatchlistIds = stockWatchlists.map(sw => sw.watchlistId);
+                let displayWatchlists: WatchlistDisplayItem[];
 
-                const displayWatchlists: WatchlistDisplayItem[] = allWatchlists.map(w => ({
-                    ...w,
-                    isSelected: stockWatchlistIds.includes(w.id),
-                }));
+                if (isCreationOnly) {
+                    // For creation-only mode, show all watchlists as non-selectable
+                    displayWatchlists = allWatchlists.map(w => ({
+                        ...w,
+                        isSelected: false, // Always false in creation mode
+                    }));
+                } else {
+                    // For stock detail mode, check which watchlists already contain this stock
+                    const stockWatchlists = await watchlistStorage.getWatchlistsForStock(stockSymbol);
+                    const stockWatchlistIds = stockWatchlists.map(sw => sw.watchlistId);
+
+                    displayWatchlists = allWatchlists.map(w => ({
+                        ...w,
+                        isSelected: stockWatchlistIds.includes(w.id),
+                    }));
+                }
 
                 setWatchlists(displayWatchlists);
             } catch (error) {
@@ -118,55 +128,97 @@ const WatchlistBottomSheet = forwardRef<WatchlistBottomSheetRef, WatchlistBottom
             }
         };
 
+        const validateWatchlistName = (name: string): string | null => {
+            const trimmedName = name.trim();
+
+            if (!trimmedName) {
+                return 'Please enter a watchlist name';
+            }
+
+            if (trimmedName.length < 2) {
+                return 'Name must be at least 2 characters';
+            }
+
+            if (trimmedName.length > 50) {
+                return 'Name must be less than 50 characters';
+            }
+
+            // Check for duplicate names (case-insensitive)
+            const existingNames = watchlists.map(w => w.name.toLowerCase());
+            if (existingNames.includes(trimmedName.toLowerCase())) {
+                return 'A watchlist with this name already exists';
+            }
+
+            return null;
+        };
+
         const createNewWatchlist = async () => {
             const trimmedName = newWatchlistName.trim();
-            if (!trimmedName) {
-                Alert.alert('Invalid Name', 'Please enter a valid watchlist name');
+            const validationError = validateWatchlistName(trimmedName);
+
+            if (validationError) {
+                setNameError(validationError);
                 return;
             }
 
             try {
                 setCreating(true);
+                setNameError(null);
                 Keyboard.dismiss();
 
-                // Create new watchlist
+                console.log('🔄 Creating new watchlist:', trimmedName);
+
+                // Create new watchlist WITHOUT adding the current stock
                 const newWatchlist = await watchlistStorage.createWatchlist(trimmedName);
 
-                // Add the current stock to this new watchlist
-                await watchlistStorage.addStockToWatchlists(stockSymbol, [newWatchlist.id]);
+                console.log('✅ Watchlist created successfully:', newWatchlist);
 
-                // Add to local state with selected = true
+                // Add to local state with selected = false (NOT selected by default)
                 const newDisplayWatchlist: WatchlistDisplayItem = {
                     ...newWatchlist,
-                    stocks: [stockSymbol],
-                    isSelected: true,
+                    stocks: [], // Empty initially
+                    isSelected: false, // NOT selected by default
                 };
 
                 setWatchlists(prev => [newDisplayWatchlist, ...prev]);
 
-                // Update parent component
-                const selectedIds = [...watchlists.filter(w => w.isSelected).map(w => w.id), newWatchlist.id];
-                onAddToWatchlist(selectedIds, stockSymbol);
-
                 // Reset form
                 setNewWatchlistName('');
-                setShowCreateNew(false);
+                setNameError(null);
 
-                // Show success message
-                Alert.alert('Created!', `${stockSymbol} added to "${trimmedName}"`);
+                // Notify parent component to refresh the list
+                onAddToWatchlist([], stockSymbol);
+
+                // Show success alert with auto-close callback
+                Alert.alert(
+                    'Success!',
+                    `Watchlist "${trimmedName}" created successfully`,
+                    [
+                        {
+                            text: 'OK',
+                            onPress: () => {
+                                // Close the bottom sheet after alert is dismissed
+                                console.log('🔽 Closing bottom sheet after success');
+                                // actionSheetRef.current?.hide();
+                            }
+                        }
+                    ]
+                );
 
             } catch (error) {
-                console.error('Error creating watchlist:', error);
-                Alert.alert('Error', 'Failed to create watchlist');
+                console.error('❌ Error creating watchlist:', error);
+                setNameError('Failed to create watchlist. Please try again.');
             } finally {
                 setCreating(false);
             }
         };
 
-        const cancelCreateNew = () => {
-            setShowCreateNew(false);
-            setNewWatchlistName('');
-            Keyboard.dismiss();
+        const handleNameChange = (text: string) => {
+            setNewWatchlistName(text);
+            // Clear error when user starts typing
+            if (nameError) {
+                setNameError(null);
+            }
         };
 
         return (
@@ -181,35 +233,68 @@ const WatchlistBottomSheet = forwardRef<WatchlistBottomSheetRef, WatchlistBottom
                 closeOnPressBack={true}
             >
 
+                {/* Updated Header with Done button */}
                 <View style={styles.header}>
-                    <View style={styles.dragHandle} />
-                    <Text style={styles.headerTitle}>Add to Watchlist</Text>
+                    {/* <View style={styles.dragHandle} /> */}
+                    <View style={styles.headerContent}>
+                        {/* <View style={styles.placeholder} /> */}
+                        <Text style={styles.headerTitle}>
+                            {isCreationOnly ? 'Create Watchlist' : 'Add to Watchlist'}
+                        </Text>
+                        <Pressable
+                            style={styles.doneButton}
+                            onPress={() => actionSheetRef.current?.hide()}
+                        >
+                            <Ionicons name="close" size={24} color="#64748B" />
+                        </Pressable>
+                    </View>
                 </View>
 
                 <ScrollView>
-                    <View style={styles.createInputRow}>
-                        <TextInput
-                            style={styles.createInput}
-                            placeholder="New Watchlist Name"
-                            value={newWatchlistName}
-                            onChangeText={setNewWatchlistName}
-                            maxLength={50}
-                            editable={!creating}
-                            returnKeyType="done"
-                            onSubmitEditing={createNewWatchlist}
-                        />
-                        <Button
-                            title={creating ? "Creating..." : "Create"}
-                            onPress={createNewWatchlist}
-                            disabled={!newWatchlistName.trim() || creating}
-                            style={[
-                                styles.createButton,
-                                (!newWatchlistName.trim() || creating) && styles.createButtonDisabled
-                            ]}
-                        />
+                    <View style={styles.createSection}>
+                        <Text style={styles.createLabel}>Create New Watchlist</Text>
+                        <View style={styles.createInputRow}>
+                            <TextInput
+                                style={[
+                                    styles.createInput,
+                                    nameError && styles.createInputError
+                                ]}
+                                placeholder="Enter watchlist name"
+                                value={newWatchlistName}
+                                onChangeText={handleNameChange}
+                                maxLength={50}
+                                editable={!creating}
+                                returnKeyType="done"
+                                onSubmitEditing={createNewWatchlist}
+                                autoCapitalize="words"
+                            />
+                            <Pressable
+                                style={[
+                                    styles.createButton,
+                                    (!newWatchlistName.trim() || creating || !!nameError) && styles.createButtonDisabled
+                                ]}
+                                onPress={createNewWatchlist}
+                                disabled={!newWatchlistName.trim() || creating || !!nameError}
+                            >
+                                <Text style={[
+                                    styles.createButtonText,
+                                    (!newWatchlistName.trim() || creating || !!nameError) && styles.createButtonTextDisabled
+                                ]}>
+                                    {creating ? "Creating..." : "Create"}
+                                </Text>
+                            </Pressable>
+                        </View>
+                        {nameError && (
+                            <View style={styles.errorContainer}>
+                                <Ionicons name="warning" size={14} color="#EF4444" />
+                                <Text style={styles.errorText}>{nameError}</Text>
+                            </View>
+                        )}
                     </View>
 
-                    {/* Show here the watchlist items  */}
+                    {watchlists.length > 0 && <View style={styles.divider} />}
+
+                    {/* Watchlist Items */}
                     {loading ? (
                         <View style={styles.loadingContainer}>
                             <ActivityIndicator size="large" color="#00D4AA" />
@@ -221,61 +306,56 @@ const WatchlistBottomSheet = forwardRef<WatchlistBottomSheetRef, WatchlistBottom
                                 <Ionicons name="bookmark-outline" size={48} color="#CBD5E1" />
                             </View>
                             <Text style={styles.emptyTitle}>No watchlists yet</Text>
-                            <Text style={styles.emptySubtitle}>Create your first watchlist to organize your stocks</Text>
+                            <Text style={styles.emptySubtitle}>Create your first watchlist above to get started</Text>
                         </View>
                     ) : (
                         <View style={styles.watchlistsList}>
+                            {!isCreationOnly && (
+                                <Text style={styles.existingLabel}>Existing Watchlists</Text>
+                            )}
                             {watchlists.map((watchlist) => (
                                 <Pressable
                                     key={watchlist.id}
                                     style={[
                                         styles.watchlistItem,
-                                        watchlist.isSelected && styles.watchlistItemSelected
+                                        watchlist.isSelected && styles.watchlistItemSelected,
+                                        isCreationOnly && styles.watchlistItemNonSelectable
                                     ]}
-                                    onPress={() => toggleWatchlistSelection(watchlist.id)}
-                                    disabled={loading || creating}
+                                    onPress={() => !isCreationOnly && toggleWatchlistSelection(watchlist.id)}
+                                    disabled={loading || creating || isCreationOnly}
                                 >
                                     <View style={styles.watchlistIcon}>
                                         <Ionicons
                                             name={watchlist.isSelected ? "bookmark" : "bookmark-outline"}
                                             size={20}
-                                            color={watchlist.isSelected ? "#00D4AA" : "#64748B"}
+                                            color={isCreationOnly ? "#9CA3AF" : (watchlist.isSelected ? "#00D4AA" : "#64748B")}
                                         />
                                     </View>
 
                                     <View style={styles.watchlistDetails}>
                                         <Text style={[
                                             styles.watchlistName,
-                                            watchlist.isSelected && styles.watchlistNameSelected
+                                            watchlist.isSelected && styles.watchlistNameSelected,
+                                            isCreationOnly && styles.watchlistNameNonSelectable
                                         ]}>
                                             {watchlist.name}
                                         </Text>
-                                        <Text style={styles.watchlistCount}>
-                                            {watchlist.stocks.length} {watchlist.stocks.length === 1 ? 'stock' : 'stocks'}
-                                        </Text>
                                     </View>
 
-                                    <View style={[
-                                        styles.checkIcon,
-                                        watchlist.isSelected && styles.checkIconSelected
-                                    ]}>
-                                        {watchlist.isSelected && (
-                                            <Ionicons name="checkmark" size={16} color="#FFFFFF" />
-                                        )}
-                                    </View>
+                                    {!isCreationOnly && (
+                                        <View style={[
+                                            styles.checkIcon,
+                                            watchlist.isSelected && styles.checkIconSelected
+                                        ]}>
+                                            {watchlist.isSelected && (
+                                                <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+                                            )}
+                                        </View>
+                                    )}
                                 </Pressable>
                             ))}
                         </View>
                     )}
-
-                    {/* Show here the add button */}
-                    <View style={styles.footer}>
-                        <Button
-                            title="Done"
-                            onPress={() => actionSheetRef.current?.hide()}
-                            style={styles.doneButton}
-                        />
-                    </View>
                 </ScrollView>
 
             </ActionSheet>
@@ -290,21 +370,16 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
-        height: '70%',
+        height: '75%',
         padding: 10
     },
-    sheetContent: {
-        flex: 1,
-        height: '100%',
-    },
 
-    // Header Styles
+    // Updated Header Styles
     header: {
         paddingTop: 8,
         paddingBottom: 15,
         borderBottomWidth: 1,
         borderBottomColor: '#F1F5F9',
-        alignItems: 'center',
     },
     dragHandle: {
         width: 36,
@@ -315,119 +390,110 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     headerContent: {
+        flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 4,
+    },
+    placeholder: {
+        width: 60, // Same width as Done button for perfect centering
     },
     headerTitle: {
         fontSize: 20,
-        fontWeight: '600',
+        fontWeight: '700',
         color: '#1E293B',
-        marginBottom: 4,
+        textAlign: 'center',
     },
-    headerSubtitle: {
-        fontSize: 14,
-        fontWeight: '500',
-        color: '#00D4AA',
-    },
-
-    // Create Section Styles
-    createSection: {
-        paddingHorizontal: 20,
-        paddingVertical: 16,
-        backgroundColor: '#FFFFFF',
-    },
-    createNewButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 16,
-        backgroundColor: '#F8FAFC',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
-    },
-    createIconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: '#00D4AA',
+    doneButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#F3F4F6',
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 12,
-    },
-    createNewText: {
-        fontSize: 16,
-        fontWeight: '500',
-        color: '#1E293B',
-        flex: 1,
     },
 
-    // Create Form Styles
-    createForm: {
-        backgroundColor: '#F8FAFC',
-        borderRadius: 12,
-        padding: 16,
-        borderWidth: 1,
-        borderColor: '#00D4AA',
+    // Create Section
+    createSection: {
+        paddingHorizontal: 10,
+        paddingVertical: 16,
+    },
+    createLabel: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#1E293B',
+        marginBottom: 12,
     },
     createInputRow: {
         flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 16,
-        marginTop: 10,
+        alignItems: 'flex-start',
+        gap: 8,
     },
     createInput: {
         flex: 1,
         fontSize: 16,
         fontWeight: '500',
         color: '#1E293B',
-        marginRight: 8,
         paddingVertical: 12,
         paddingHorizontal: 12,
-        borderWidth: 1,
+        borderWidth: 1.5,
         borderColor: '#00D4AA',
         borderRadius: 12,
         backgroundColor: '#FFFFFF',
     },
-    cancelButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: '#F1F5F9',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    createActions: {
-        alignItems: 'flex-end',
+    createInputError: {
+        borderColor: '#EF4444',
+        backgroundColor: '#FEF2F2',
     },
     createButton: {
         backgroundColor: '#00D4AA',
-        paddingHorizontal: 24,
-        paddingVertical: 10,
-        borderRadius: 8,
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderRadius: 12,
         minWidth: 80,
         alignItems: 'center',
+        justifyContent: 'center',
+    },
+    createButtonDisabled: {
+        backgroundColor: '#CBD5E1',
     },
     createButtonText: {
         color: '#FFFFFF',
         fontSize: 14,
         fontWeight: '600',
     },
-    createButtonDisabled: {
-        backgroundColor: '#CBD5E1',
+    createButtonTextDisabled: {
+        color: '#9CA3AF',
+    },
+    errorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8,
+        paddingHorizontal: 4,
+        gap: 6,
+    },
+    errorText: {
+        fontSize: 13,
+        color: '#EF4444',
+        fontWeight: '500',
+        flex: 1,
     },
 
     // Divider
     divider: {
         height: 1,
         backgroundColor: '#F1F5F9',
-        marginHorizontal: 20,
-        marginVertical: 16,
+        marginHorizontal: 10,
+        marginVertical: 8,
     },
 
-    // Watchlists ScrollView
-    watchlistsScrollView: {
-        flex: 1,
-        paddingHorizontal: 20,
+    // Existing watchlists section
+    existingLabel: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#1E293B',
+        marginBottom: 12,
+        paddingHorizontal: 10,
     },
 
     // Loading State
@@ -490,6 +556,9 @@ const styles = StyleSheet.create({
         borderColor: '#00D4AA',
         backgroundColor: '#F8FFFD',
     },
+    watchlistItemNonSelectable: {
+        opacity: 0.6,
+    },
     watchlistIcon: {
         width: 40,
         height: 40,
@@ -506,16 +575,13 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '500',
         color: '#1E293B',
-        marginBottom: 2,
     },
     watchlistNameSelected: {
         color: '#00D4AA',
         fontWeight: '600',
     },
-    watchlistCount: {
-        fontSize: 12,
-        color: '#64748B',
-        fontWeight: '500',
+    watchlistNameNonSelectable: {
+        color: '#9CA3AF',
     },
     checkIcon: {
         width: 24,
@@ -531,23 +597,4 @@ const styles = StyleSheet.create({
         backgroundColor: '#00D4AA',
         borderColor: '#00D4AA',
     },
-
-    // Footer
-    footer: {
-        paddingHorizontal: 10,
-        paddingTop: 16,
-        paddingBottom: 32,
-        borderTopWidth: 1,
-        borderTopColor: '#F1F5F9',
-        backgroundColor: '#FFFFFF',
-        marginTop: 20,
-    },
-    doneButton: {
-        backgroundColor: '#00D4AA',
-        paddingVertical: 14,
-        borderRadius: 12,
-        width: '100%',
-    },
 });
-
-export default WatchlistBottomSheet;

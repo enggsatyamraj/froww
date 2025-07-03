@@ -1,11 +1,15 @@
+// app/(tabs)/watchlist.tsx - REDESIGNED (Calm & Smooth UI)
+
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     FlatList,
+    Platform,
     Pressable,
     RefreshControl,
     SafeAreaView,
@@ -13,10 +17,9 @@ import {
     Text,
     View,
 } from 'react-native';
-import { Button } from '../../components/ui/Button';
-import WatchlistBottomSheet, { WatchlistBottomSheetRef } from '../../components/WatchlistBottomSheet';
+import { WatchlistBottomSheet, WatchlistBottomSheetRef } from '../../components/WatchlistBottomSheet';
 import { WatchlistItem, watchlistStorage } from '../../services/watchlistStorage';
-import { colors, spacing, typography } from '../../theme';
+import { spacing } from '../../theme';
 
 export default function WatchlistScreen() {
     const [watchlists, setWatchlists] = useState<WatchlistItem[]>([]);
@@ -44,29 +47,28 @@ export default function WatchlistScreen() {
     };
 
     const handleCreateWatchlist = () => {
-        // Open the bottom sheet with a dummy stock symbol for creation
-        // You can modify this to handle creation differently if needed
         watchlistBottomSheetRef.current?.show();
+    };
+
+    const handleWatchlistPress = (watchlist: WatchlistItem) => {
+        console.log('Navigating to watchlist:', watchlist.name);
+        router.push(`/watchlist/${watchlist.id}`);
     };
 
     const handleDeleteWatchlist = async (watchlistId: string, watchlistName: string) => {
         Alert.alert(
             'Delete Watchlist',
-            `Are you sure you want to delete "${watchlistName}"? This action cannot be undone.`,
+            `Are you sure you want to delete "${watchlistName}"?`,
             [
-                {
-                    text: 'Cancel',
-                    style: 'cancel',
-                },
+                { text: 'Cancel', style: 'cancel' },
                 {
                     text: 'Delete',
                     style: 'destructive',
                     onPress: async () => {
                         try {
                             await watchlistStorage.deleteWatchlist(watchlistId);
-                            await loadWatchlists(); // Reload the list
+                            await loadWatchlists();
                         } catch (error) {
-                            console.error('Error deleting watchlist:', error);
                             Alert.alert('Error', 'Failed to delete watchlist');
                         }
                     },
@@ -75,253 +77,378 @@ export default function WatchlistScreen() {
         );
     };
 
-    const handleWatchlistPress = (watchlist: WatchlistItem) => {
-        // Navigate to watchlist detail screen
-        // You can implement navigation here
-        console.log('Open watchlist:', watchlist.name);
-        // navigation.navigate('WatchlistDetail', { watchlistId: watchlist.id });
-    };
-
     const handleAddToWatchlist = (watchlistIds: string[], stockSymbol: string) => {
-        // This callback is called when stocks are added/removed from watchlists
-        console.log('Updated watchlists:', watchlistIds, 'for stock:', stockSymbol);
-        loadWatchlists(); // Refresh the list to show updated counts
+        loadWatchlists();
     };
 
-    // Load watchlists when screen comes into focus
     useFocusEffect(
         useCallback(() => {
             loadWatchlists();
         }, [])
     );
 
-    const renderWatchlistItem = ({ item }: { item: WatchlistItem }) => (
+    const renderWatchlistItem = ({ item, index }: { item: WatchlistItem; index: number }) => (
         <Pressable
-            style={styles.watchlistCard}
+            style={({ pressed }) => [
+                styles.watchlistItem,
+                pressed && styles.watchlistItemPressed,
+            ]}
             onPress={() => handleWatchlistPress(item)}
         >
-            <View style={styles.cardContent}>
-                <View style={styles.cardHeader}>
+            <View style={styles.watchlistContent}>
+                {/* Left side - Icon and Info */}
+                <View style={styles.leftContent}>
                     <View style={styles.iconContainer}>
-                        <Ionicons name="bookmark" size={24} color={colors.primary} />
+                        <Ionicons name="bookmark" size={20} color="#00D4AA" />
                     </View>
-                    <Pressable
-                        style={styles.deleteButton}
-                        onPress={() => handleDeleteWatchlist(item.id, item.name)}
-                    >
-                        <Ionicons name="trash-outline" size={20} color={colors.text.muted} />
-                    </Pressable>
+                    <View style={styles.textContent}>
+                        <Text style={styles.watchlistName} numberOfLines={1}>
+                            {item.name}
+                        </Text>
+                        <Text style={styles.stockCount}>
+                            {item.stocks.length} {item.stocks.length === 1 ? 'stock' : 'stocks'}
+                        </Text>
+                    </View>
                 </View>
 
-                <Text style={styles.cardTitle}>{item.name}</Text>
-
-                <View style={styles.cardFooter}>
-                    <Text style={styles.stockCount}>
-                        {item.stocks.length} {item.stocks.length === 1 ? 'stock' : 'stocks'}
-                    </Text>
-                    <Text style={styles.createdDate}>
-                        Created {new Date(item.createdAt).toLocaleDateString()}
-                    </Text>
+                {/* Right side - Actions */}
+                <View style={styles.rightContent}>
+                    <Pressable
+                        style={styles.menuButton}
+                        onPress={() => handleDeleteWatchlist(item.id, item.name)}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                        <Ionicons name="ellipsis-horizontal" size={16} color="#94A3B8" />
+                    </Pressable>
+                    <View style={styles.arrowContainer}>
+                        <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                    </View>
                 </View>
             </View>
         </Pressable>
     );
 
-    const renderEmptyState = () => (
-        <View style={styles.emptyState}>
-            <Ionicons
-                name="heart-outline"
-                size={64}
-                color={colors.text.muted}
-            />
-            <Text style={styles.emptyTitle}>No Watchlists Yet</Text>
-            <Text style={styles.emptyDescription}>
-                Create your first watchlist to track your favorite stocks
-            </Text>
-            <Button
-                title="Create Watchlist"
-                onPress={handleCreateWatchlist}
-                style={styles.button}
-            />
-        </View>
-    );
-
     const renderHeader = () => (
-        <View style={styles.header}>
-            <Text style={styles.screenTitle}>My Watchlists</Text>
-            {watchlists.length > 0 && (
-                <Button
-                    title="New List"
-                    onPress={handleCreateWatchlist}
-                    style={styles.headerButton}
-                />
-            )}
+        <SafeAreaView style={styles.headerSafeArea}>
+            <View style={[
+                styles.header,
+                { paddingTop: Platform.OS === 'android' ? spacing.xl + 30 : spacing.md }
+            ]}>
+                <Text style={styles.greeting}>Good {getTimeGreeting()}</Text>
+                <Text style={styles.title}>Watchlists</Text>
+                <Text style={styles.subtitle}>
+                    {watchlists.length > 0
+                        ? `${watchlists.length} ${watchlists.length === 1 ? 'list' : 'lists'} created`
+                        : 'Organize your favorite stocks'
+                    }
+                </Text>
+            </View>
+        </SafeAreaView>
+    );
+
+    const renderEmptyState = () => (
+        <View style={styles.emptyContainer}>
+            <View style={styles.emptyContent}>
+                <View style={styles.emptyIconContainer}>
+                    <Ionicons name="bookmark-outline" size={48} color="#D1D5DB" />
+                </View>
+                <Text style={styles.emptyTitle}>Create your first watchlist</Text>
+                <Text style={styles.emptyDescription}>
+                    Keep track of stocks you're interested in by organizing them into watchlists
+                </Text>
+                <Pressable style={styles.createFirstButton} onPress={handleCreateWatchlist}>
+                    <Ionicons name="add" size={18} color="#FFFFFF" />
+                    <Text style={styles.createFirstButtonText}>Create Watchlist</Text>
+                </Pressable>
+            </View>
         </View>
     );
 
-    if (loading) {
-        return (
-            <SafeAreaView style={styles.container}>
-                <StatusBar style="dark" />
+    const renderContent = () => {
+        if (loading) {
+            return (
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={colors.primary} />
+                    <ActivityIndicator size="large" color="#00D4AA" />
                     <Text style={styles.loadingText}>Loading watchlists...</Text>
                 </View>
-            </SafeAreaView>
+            );
+        }
+
+        if (watchlists.length === 0) {
+            return renderEmptyState();
+        }
+
+        return (
+            <View style={styles.listContainer}>
+                {/* Section Header */}
+                <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>My Watchlists</Text>
+                    <Pressable style={styles.addButton} onPress={handleCreateWatchlist}>
+                        <Ionicons name="add" size={18} color="#00D4AA" />
+                    </Pressable>
+                </View>
+
+                {/* Watchlists List */}
+                <View style={styles.listWrapper}>
+                    <FlatList
+                        data={watchlists}
+                        renderItem={renderWatchlistItem}
+                        keyExtractor={(item) => item.id}
+                        showsVerticalScrollIndicator={false}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={onRefresh}
+                                tintColor="#00D4AA"
+                                colors={["#00D4AA"]}
+                                progressBackgroundColor="#FFFFFF"
+                            />
+                        }
+                        contentContainerStyle={styles.flatListContent}
+                        ItemSeparatorComponent={() => <View style={styles.separator} />}
+                    />
+                </View>
+            </View>
         );
-    }
+    };
+
+    const getTimeGreeting = () => {
+        const hour = new Date().getHours();
+        if (hour < 12) return 'morning';
+        if (hour < 17) return 'afternoon';
+        return 'evening';
+    };
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar style="dark" />
-            <View style={styles.content}>
-                {watchlists.length === 0 ? (
-                    renderEmptyState()
-                ) : (
-                    <>
-                        {renderHeader()}
-                        <FlatList
-                            data={watchlists}
-                            renderItem={renderWatchlistItem}
-                            keyExtractor={(item) => item.id}
-                            showsVerticalScrollIndicator={false}
-                            refreshControl={
-                                <RefreshControl
-                                    refreshing={refreshing}
-                                    onRefresh={onRefresh}
-                                    colors={[colors.primary]}
-                                />
-                            }
-                            contentContainerStyle={styles.listContainer}
-                        />
-                    </>
-                )}
-            </View>
+        <View style={styles.container}>
+            <StatusBar style="dark" backgroundColor="#FFFFFF" />
 
-            {/* Watchlist Bottom Sheet for creating new watchlists */}
+            {renderHeader()}
+            {renderContent()}
+
             <WatchlistBottomSheet
                 ref={watchlistBottomSheetRef}
-                stockSymbol="TEMP" // Dummy symbol for creation
+                stockSymbol="TEMP"
                 onAddToWatchlist={handleAddToWatchlist}
+                isCreationOnly={true}
             />
-        </SafeAreaView>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.background,
+        backgroundColor: '#FAFBFC',
     },
-    content: {
-        flex: 1,
-        padding: spacing.lg,
+
+    // Header Styles
+    headerSafeArea: {
+        backgroundColor: '#FFFFFF',
     },
+    header: {
+        paddingHorizontal: 24,
+        paddingBottom: 24,
+        backgroundColor: '#FFFFFF',
+    },
+    greeting: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#00D4AA',
+        marginBottom: 4,
+        textTransform: 'capitalize',
+    },
+    title: {
+        fontSize: 28,
+        fontWeight: '700',
+        color: '#1F2937',
+        marginBottom: 6,
+        letterSpacing: -0.4,
+    },
+    subtitle: {
+        fontSize: 15,
+        color: '#6B7280',
+        fontWeight: '400',
+        lineHeight: 20,
+    },
+
+    // Loading State
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        backgroundColor: '#FAFBFC',
     },
     loadingText: {
-        marginTop: spacing.md,
-        fontSize: typography.fontSize.base,
-        color: colors.text.secondary,
+        marginTop: 16,
+        fontSize: 15,
+        color: '#6B7280',
+        fontWeight: '500',
     },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: spacing.lg,
-    },
-    screenTitle: {
-        fontSize: typography.fontSize.xxl,
-        fontWeight: typography.fontWeight.bold,
-        color: colors.text.primary,
-    },
-    headerButton: {
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
-    },
-    listContainer: {
-        paddingBottom: spacing.lg,
-    },
-    watchlistCard: {
-        backgroundColor: colors.surface,
-        borderRadius: 12,
-        marginBottom: spacing.md,
-        borderWidth: 1,
-        borderColor: colors.border,
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 2,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 3.84,
-        elevation: 5,
-    },
-    cardContent: {
-        padding: spacing.lg,
-    },
-    cardHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: spacing.md,
-    },
-    iconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: colors.primaryLight,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    deleteButton: {
-        padding: spacing.xs,
-    },
-    cardTitle: {
-        fontSize: typography.fontSize.lg,
-        fontWeight: typography.fontWeight.semibold,
-        color: colors.text.primary,
-        marginBottom: spacing.sm,
-    },
-    cardFooter: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    stockCount: {
-        fontSize: typography.fontSize.sm,
-        fontWeight: typography.fontWeight.medium,
-        color: colors.primary,
-    },
-    createdDate: {
-        fontSize: typography.fontSize.xs,
-        color: colors.text.muted,
-    },
-    emptyState: {
+
+    // Empty State
+    emptyContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: spacing.xl,
+        paddingHorizontal: 32,
+        backgroundColor: '#FAFBFC',
+    },
+    emptyContent: {
+        alignItems: 'center',
+        maxWidth: 280,
+    },
+    emptyIconContainer: {
+        width: 88,
+        height: 88,
+        borderRadius: 44,
+        backgroundColor: '#F9FAFB',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: '#F3F4F6',
     },
     emptyTitle: {
-        fontSize: typography.fontSize.xl,
-        fontWeight: typography.fontWeight.semibold,
-        color: colors.text.primary,
-        marginTop: spacing.lg,
-        marginBottom: spacing.sm,
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#1F2937',
+        marginBottom: 12,
         textAlign: 'center',
     },
     emptyDescription: {
-        fontSize: typography.fontSize.base,
-        color: colors.text.secondary,
+        fontSize: 15,
+        color: '#6B7280',
         textAlign: 'center',
         lineHeight: 22,
-        marginBottom: spacing.xl,
+        marginBottom: 32,
     },
-    button: {
-        minWidth: 180,
+    createFirstButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#00D4AA',
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderRadius: 10,
+        gap: 6,
+    },
+    createFirstButtonText: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '600',
+    },
+
+    // List Container
+    listContainer: {
+        flex: 1,
+        paddingTop: 8,
+        backgroundColor: '#FAFBFC',
+    },
+    sectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 24,
+        marginBottom: 16,
+        marginTop: 10
+    },
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#1F2937',
+    },
+    addButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#F0FDF9',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#D1FAE5',
+    },
+
+    // List Wrapper
+    listWrapper: {
+        flex: 1,
+        backgroundColor: '#FFFFFF',
+        marginHorizontal: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#F3F4F6',
+        marginBottom: 20,
+    },
+    flatListContent: {
+        paddingVertical: 4,
+    },
+
+    // Watchlist Items
+    watchlistItem: {
+        paddingHorizontal: 20,
+        paddingVertical: 16,
+        backgroundColor: '#FFFFFF',
+    },
+    watchlistItemPressed: {
+        backgroundColor: '#F9FAFB',
+    },
+    watchlistContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    leftContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    iconContainer: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#F0FDF9',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+        borderWidth: 1,
+        borderColor: '#D1FAE5',
+    },
+    textContent: {
+        flex: 1,
+    },
+    watchlistName: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#1F2937',
+        marginBottom: 2,
+    },
+    stockCount: {
+        fontSize: 13,
+        color: '#9CA3AF',
+        fontWeight: '500',
+    },
+    rightContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    menuButton: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: '#F9FAFB',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    arrowContainer: {
+        width: 20,
+        height: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    separator: {
+        height: 1,
+        backgroundColor: '#F3F4F6',
+        marginLeft: 68,
+        marginRight: 20,
     },
 });

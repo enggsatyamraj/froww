@@ -1,3 +1,5 @@
+// theme/colors.ts - UPDATED VERSION
+
 export const colors = {
     // Background colors
     background: '#ffffff',
@@ -13,6 +15,7 @@ export const colors = {
     // Brand colors (Groww style)
     primary: '#00d09c',    // Groww green
     primaryDark: '#00b386',
+    primaryLight: '#e6faf6', // Light green background
 
     // Stock colors
     bullish: '#22c55e',    // Green for gains

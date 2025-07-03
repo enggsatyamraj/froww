@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#F8FAFC',
     },
     content: {
-        paddingBottom: 120,
+        paddingBottom: 50,
     },
     loadingContainer: {
         padding: 20,

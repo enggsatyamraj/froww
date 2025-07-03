@@ -17,7 +17,7 @@ import {
     View,
 } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
-import WatchlistBottomSheet, { WatchlistBottomSheetRef } from '../../components/WatchlistBottomSheet';
+import { WatchlistBottomSheet, WatchlistBottomSheetRef } from '../../components/WatchlistBottomSheet';
 import { alphaVantageApi } from '../../services/alphaVantageApi';
 import { watchlistStorage } from '../../services/watchlistStorage';
 import { spacing } from '../../theme';
