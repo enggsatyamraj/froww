@@ -2,7 +2,7 @@
 
 import { CompanyOverview, SearchResponse, TopGainersLosersResponse } from '../types/api';
 
-const API_KEY = '8THG5EUFWBSIQ8TR';
+const API_KEY = process.env.API_KEY;
 const BASE_URL = 'https://www.alphavantage.co/query';
 
 // Simple cache storage

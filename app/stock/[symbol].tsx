@@ -1,4 +1,4 @@
-// app/stock/[symbol].tsx - UPDATED with Real Chart Data
+// app/stock/[symbol].tsx - Complete Updated Version
 
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -10,6 +10,7 @@ import {
     Dimensions,
     Platform,
     Pressable,
+    RefreshControl,
     SafeAreaView,
     ScrollView,
     StyleSheet,
@@ -18,15 +19,44 @@ import {
 } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import { WatchlistBottomSheet, WatchlistBottomSheetRef } from '../../components/WatchlistBottomSheet';
+import { StockDetailSkeleton } from '../../components/ui/StockDetailSkeleton';
 import { alphaVantageApi } from '../../services/alphaVantageApi';
+import { CacheKeys, cacheManager } from '../../services/cacheManager';
 import { watchlistStorage } from '../../services/watchlistStorage';
 import { spacing } from '../../theme';
 import { CompanyOverview } from '../../types/api';
 
 const { width } = Dimensions.get('window');
-const CHART_WIDTH = width - 60; // Account for padding
+const CHART_WIDTH = width - 60;
 
 type TimePeriod = '1D' | '1W' | '1M' | '3M' | '1Y';
+
+interface ChartDataPoint {
+    time: string;
+    price: number;
+    volume: number;
+    timestamp: number;
+    displayTime: string; // For chart labels
+}
+
+// Network connectivity checker
+const checkNetworkConnectivity = async (): Promise<boolean> => {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch('https://www.google.com', {
+            method: 'HEAD',
+            signal: controller.signal,
+            cache: 'no-cache'
+        });
+
+        clearTimeout(timeoutId);
+        return response.ok;
+    } catch (error) {
+        return false;
+    }
+};
 
 export default function StockDetailScreen() {
     const params = useLocalSearchParams();
@@ -34,27 +64,82 @@ export default function StockDetailScreen() {
 
     const [companyData, setCompanyData] = useState<CompanyOverview | null>(null);
     const [quoteData, setQuoteData] = useState<any>(null);
-    const [chartData, setChartData] = useState<any[]>([]);
+    const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
     const [loading, setLoading] = useState(true);
     const [chartLoading, setChartLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isInWatchlist, setIsInWatchlist] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState<TimePeriod>('1D');
+    const [isOffline, setIsOffline] = useState(false);
+    const [showOfflineBanner, setShowOfflineBanner] = useState(false);
 
-    // Bottom sheet ref
     const watchlistBottomSheetRef = useRef<WatchlistBottomSheetRef>(null);
 
-    const loadStockData = async () => {
+    // Check network connectivity
+    const checkConnectivity = async () => {
+        const isConnected = await checkNetworkConnectivity();
+        setIsOffline(!isConnected);
+        setShowOfflineBanner(!isConnected);
+
+        if (!isConnected) {
+            console.log('📵 No internet connection detected');
+        }
+
+        return isConnected;
+    };
+
+    const loadStockData = async (forceRefresh = false) => {
         try {
             setLoading(true);
             setError(null);
 
             console.log('📊 Loading stock data for:', symbol);
 
-            // Load company overview and quote data in parallel
+            // Check connectivity first
+            const isConnected = await checkConnectivity();
+
+            // Try to get data from cache first (especially important when offline)
+            const [cachedOverview, cachedQuote] = await Promise.all([
+                cacheManager.get<CompanyOverview>(CacheKeys.companyOverview(symbol)),
+                cacheManager.get<any>(CacheKeys.globalQuote(symbol))
+            ]);
+
+            if (cachedOverview && cachedQuote && (!forceRefresh || !isConnected)) {
+                console.log('✅ Using cached stock data');
+                setCompanyData(cachedOverview);
+                setQuoteData(cachedQuote);
+
+                // Load cached chart data
+                const cachedChart = await cacheManager.get<ChartDataPoint[]>(
+                    CacheKeys.chartData(symbol, selectedPeriod)
+                );
+                if (cachedChart) {
+                    setChartData(cachedChart);
+                }
+
+                setLoading(false);
+
+                if (!isConnected) {
+                    setShowOfflineBanner(true);
+                }
+                return;
+            }
+
+            // If offline and no cache, show offline error
+            if (!isConnected) {
+                throw new Error('No internet connection and no cached data available');
+            }
+
+            // Load fresh data if online
             const [overview, quote] = await Promise.all([
                 alphaVantageApi.getCompanyOverview(symbol),
                 alphaVantageApi.getGlobalQuote(symbol)
+            ]);
+
+            // Cache the data
+            await Promise.all([
+                cacheManager.set(CacheKeys.companyOverview(symbol), overview),
+                cacheManager.set(CacheKeys.globalQuote(symbol), quote)
             ]);
 
             setCompanyData(overview);
@@ -62,13 +147,26 @@ export default function StockDetailScreen() {
 
             console.log('✅ Basic stock data loaded successfully');
 
-            // Load initial chart data with 1W instead of 1D
-            await loadChartData('1W'); // Changed from '1D'
+            // Load initial chart data
+            await loadChartData('1D');
 
         } catch (err) {
             console.error('❌ Error loading stock data:', err);
             const errorMessage = err instanceof Error ? err.message : 'Failed to load stock data';
             setError(errorMessage);
+
+            // Try to show any available cached data even if there's an error
+            const [cachedOverview, cachedQuote] = await Promise.all([
+                cacheManager.get<CompanyOverview>(CacheKeys.companyOverview(symbol)),
+                cacheManager.get<any>(CacheKeys.globalQuote(symbol))
+            ]);
+
+            if (cachedOverview && cachedQuote) {
+                setCompanyData(cachedOverview);
+                setQuoteData(cachedQuote);
+                setError(null);
+                setShowOfflineBanner(true);
+            }
         } finally {
             setLoading(false);
         }
@@ -79,22 +177,43 @@ export default function StockDetailScreen() {
             setChartLoading(true);
             console.log(`📈 Loading ${period} chart data for ${symbol}...`);
 
+            // Check cache first
+            const cacheKey = CacheKeys.chartData(symbol, period);
+            const cachedChartData = await cacheManager.get<ChartDataPoint[]>(cacheKey);
+
+            if (cachedChartData && cachedChartData.length > 0) {
+                console.log(`✅ Using cached chart data for ${period}`);
+                setChartData(cachedChartData);
+                setChartLoading(false);
+                return;
+            }
+
+            // Check connectivity for fresh data
+            const isConnected = await checkConnectivity();
+            if (!isConnected) {
+                console.log('📵 Offline - using fallback chart data');
+                const fallbackData = generateFallbackChartData(period);
+                setChartData(fallbackData);
+                setChartLoading(false);
+                return;
+            }
+
             // Determine the best interval based on selected period
             let interval: '1min' | '5min' | '15min' | '30min' | '60min' | 'daily';
 
             switch (period) {
                 case '1D':
-                    interval = '5min'; // 5-minute intervals for 1 day
+                    interval = '5min';
                     break;
                 case '1W':
-                    interval = '30min'; // 30-minute intervals for 1 week
+                    interval = '30min';
                     break;
                 case '1M':
-                    interval = 'daily'; // Daily intervals for 1 month
+                    interval = 'daily';
                     break;
                 case '3M':
                 case '1Y':
-                    interval = 'daily'; // Daily intervals for longer periods
+                    interval = 'daily';
                     break;
                 default:
                     interval = 'daily';
@@ -103,90 +222,215 @@ export default function StockDetailScreen() {
             // Fetch time series data
             const timeSeriesData = await alphaVantageApi.getTimeSeriesData(symbol, interval);
 
-            // Process data for chart
-            const processedData = alphaVantageApi.processTimeSeriesForChart(timeSeriesData, interval, period);
+            // Process data for chart with correct labels
+            const processedData = processTimeSeriesForChart(timeSeriesData, interval, period);
+
+            // Cache the processed data
+            await cacheManager.set(cacheKey, processedData);
 
             setChartData(processedData);
             console.log(`✅ Chart data loaded for ${period}:`, processedData.length, 'points');
 
         } catch (error) {
             console.error(`❌ Error loading chart data for ${period}:`, error);
-            // Set fallback chart data
-            setChartData(generateFallbackChartData(period));
+            // Use fallback chart data
+            const fallbackData = generateFallbackChartData(period);
+            setChartData(fallbackData);
         } finally {
             setChartLoading(false);
         }
     };
 
+    // FIXED: Proper chart data processing with correct time labels
+    const processTimeSeriesForChart = (timeSeriesData: any, interval: string, period: TimePeriod): ChartDataPoint[] => {
+        try {
+            const timeSeriesKey = interval === 'daily' ? 'Time Series (Daily)' : `Time Series (${interval})`;
+            const rawData = timeSeriesData[timeSeriesKey];
 
-    const generateFallbackChartData = (period: TimePeriod) => {
-        const data = [];
+            if (!rawData) {
+                return generateFallbackChartData(period);
+            }
+
+            // Convert to array and sort by date
+            const dataPoints = Object.entries(rawData).map(([dateTime, values]: [string, any]) => {
+                const timestamp = new Date(dateTime).getTime();
+                const price = parseFloat(values['4. close']); // Use closing price
+
+                return {
+                    dateTime,
+                    timestamp,
+                    price,
+                    volume: parseInt(values['5. volume']),
+                    open: parseFloat(values['1. open']),
+                    high: parseFloat(values['2. high']),
+                    low: parseFloat(values['3. low']),
+                };
+            }).sort((a, b) => a.timestamp - b.timestamp);
+
+            // Filter based on period
+            const now = new Date();
+            let filteredData = dataPoints;
+
+            switch (period) {
+                case '1D':
+                    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                    filteredData = dataPoints.filter(point => new Date(point.dateTime) >= oneDayAgo);
+                    break;
+                case '1W':
+                    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                    filteredData = dataPoints.filter(point => new Date(point.dateTime) >= oneWeekAgo);
+                    break;
+                case '1M':
+                    const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                    filteredData = dataPoints.filter(point => new Date(point.dateTime) >= oneMonthAgo);
+                    break;
+                case '3M':
+                    const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+                    filteredData = dataPoints.filter(point => new Date(point.dateTime) >= threeMonthsAgo);
+                    break;
+                case '1Y':
+                    const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+                    filteredData = dataPoints.filter(point => new Date(point.dateTime) >= oneYearAgo);
+                    break;
+            }
+
+            // Limit data points for chart performance (take every nth point if too many)
+            const maxPoints = 30;
+            if (filteredData.length > maxPoints) {
+                const step = Math.ceil(filteredData.length / maxPoints);
+                filteredData = filteredData.filter((_, index) => index % step === 0);
+            }
+
+            // FIXED: Generate correct time labels based on period and interval
+            return filteredData.map(point => {
+                const date = new Date(point.dateTime);
+                let displayTime: string;
+                let time: string;
+
+                if (period === '1D') {
+                    // For 1 day: show hours (HH:MM format)
+                    time = date.toLocaleTimeString('en-US', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                    displayTime = time;
+                } else if (period === '1W') {
+                    // For 1 week: show day and time (Mon 14:30)
+                    const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                    const timeStr = date.toLocaleTimeString('en-US', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                    time = `${dayName} ${timeStr.slice(0, 5)}`;
+                    displayTime = time;
+                } else {
+                    // For longer periods: show date (MM/DD or DD/MM format)
+                    time = date.toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric'
+                    });
+                    displayTime = time;
+                }
+
+                return {
+                    time,
+                    displayTime,
+                    price: point.price,
+                    volume: point.volume,
+                    timestamp: point.timestamp
+                };
+            });
+
+        } catch (error) {
+            console.error('Error processing time series data:', error);
+            return generateFallbackChartData(period);
+        }
+    };
+
+    const generateFallbackChartData = (period: TimePeriod): ChartDataPoint[] => {
+        const data: ChartDataPoint[] = [];
         const now = new Date();
-        let pointCount = 25; // Changed default from 20 to 25 (1W default)
-        let intervalMinutes = 60 * 4; // Changed default from 15 to 240 (1W default)
+        let pointCount = 20;
+        let intervalMinutes = 60;
 
-        // Adjust data points based on period
+        // Adjust data points and intervals based on period
         switch (period) {
             case '1D':
-                pointCount = 20;
-                intervalMinutes = 15;
+                pointCount = 24;
+                intervalMinutes = 60; // Every hour
                 break;
             case '1W':
-                pointCount = 25;
-                intervalMinutes = 60 * 4; // 4 hours
+                pointCount = 21; // 3 times per day for a week
+                intervalMinutes = 60 * 8; // Every 8 hours
                 break;
             case '1M':
                 pointCount = 30;
-                intervalMinutes = 60 * 24; // 1 day
+                intervalMinutes = 60 * 24; // Daily
                 break;
             case '3M':
                 pointCount = 30;
-                intervalMinutes = 60 * 24 * 3; // 3 days
+                intervalMinutes = 60 * 24 * 3; // Every 3 days
                 break;
             case '1Y':
                 pointCount = 30;
-                intervalMinutes = 60 * 24 * 12; // 12 days
+                intervalMinutes = 60 * 24 * 12; // Every 12 days
                 break;
         }
+
+        const basePrice = Math.random() * 200 + 50;
 
         for (let i = 0; i < pointCount; i++) {
             const time = new Date(now);
             time.setMinutes(time.getMinutes() - (pointCount - i) * intervalMinutes);
 
+            let displayTime: string;
             let timeLabel: string;
+
             if (period === '1D') {
-                timeLabel = time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                timeLabel = time.toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                });
+                displayTime = timeLabel;
+            } else if (period === '1W') {
+                const dayName = time.toLocaleDateString('en-US', { weekday: 'short' });
+                const timeStr = time.toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                });
+                timeLabel = `${dayName} ${timeStr.slice(0, 5)}`;
+                displayTime = timeLabel;
             } else {
-                timeLabel = time.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                timeLabel = time.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric'
+                });
+                displayTime = timeLabel;
             }
 
             data.push({
                 time: timeLabel,
-                price: Math.random() * 200 + 50 + (Math.sin(i * 0.3) * 10),
-                volume: Math.floor(Math.random() * 1000000)
+                displayTime,
+                price: basePrice + (Math.random() - 0.5) * 20 + Math.sin(i * 0.3) * 10,
+                volume: Math.floor(Math.random() * 1000000),
+                timestamp: time.getTime()
             });
         }
 
         return data;
     };
 
-    const checkWatchlistStatus = async () => {
-        try {
-            const inWatchlist = await watchlistStorage.isStockInWatchlists(symbol);
-            setIsInWatchlist(inWatchlist);
-            console.log(`📋 ${symbol} watchlist status:`, inWatchlist);
-        } catch (error) {
-            console.error('Error checking watchlist status:', error);
-        }
-    };
-
-    // Enhanced Chart Component with real data
-    const EnhancedLineChart = ({ data, width, height }: { data: any[], width: number, height: number }) => {
+    // Enhanced Chart Component with proper error handling
+    const EnhancedLineChart = ({ data, width, height }: { data: ChartDataPoint[], width: number, height: number }) => {
         if (!data || data.length === 0) {
             return (
                 <View style={[styles.chartPlaceholder, { width, height }]}>
                     <Ionicons name="trending-up" size={48} color="#00D4AA" />
-                    <Text style={styles.chartPlaceholderText}>Loading chart data...</Text>
+                    <Text style={styles.chartPlaceholderText}>No chart data available</Text>
                 </View>
             );
         }
@@ -198,14 +442,16 @@ export default function StockDetailScreen() {
             labels: displayData.map((item, index) => {
                 // Show every other label to avoid crowding
                 if (index % 2 === 0) {
-                    return item.time.toString().slice(0, 5);
+                    return item.displayTime.length > 8
+                        ? item.displayTime.slice(0, 8)
+                        : item.displayTime;
                 }
                 return '';
             }),
             datasets: [
                 {
                     data: displayData.map(item => item.price),
-                    color: (opacity = 1) => `rgba(0, 212, 170, ${opacity})`, // Froww green
+                    color: (opacity = 1) => `rgba(0, 212, 170, ${opacity})`,
                     strokeWidth: 3,
                 },
             ],
@@ -255,13 +501,21 @@ export default function StockDetailScreen() {
         );
     };
 
+    const checkWatchlistStatus = async () => {
+        try {
+            const inWatchlist = await watchlistStorage.isStockInWatchlists(symbol);
+            setIsInWatchlist(inWatchlist);
+        } catch (error) {
+            console.error('Error checking watchlist status:', error);
+        }
+    };
+
     const handleBack = () => {
         router.back();
     };
 
     const handleWatchlistPress = () => {
         if (isInWatchlist) {
-            // Show confirmation to remove from all watchlists
             Alert.alert(
                 'Remove from Watchlists',
                 `Remove ${symbol} from all watchlists?`,
@@ -276,7 +530,6 @@ export default function StockDetailScreen() {
                                 setIsInWatchlist(false);
                                 Alert.alert('Removed', `${symbol} removed from all watchlists`);
                             } catch (error) {
-                                console.error('Error removing from watchlists:', error);
                                 Alert.alert('Error', 'Failed to remove from watchlists');
                             }
                         }
@@ -284,26 +537,25 @@ export default function StockDetailScreen() {
                 ]
             );
         } else {
-            // Show bottom sheet to add to watchlists
             watchlistBottomSheetRef.current?.show();
         }
     };
 
     const handleAddToWatchlist = async (watchlistIds: string[], stockSymbol: string) => {
-        console.log(`Adding ${stockSymbol} to watchlists:`, watchlistIds);
-        // Update the UI state
         setIsInWatchlist(watchlistIds.length > 0);
     };
 
-    // Handle time period change
     const handleTimePeriodChange = async (period: TimePeriod) => {
         if (period === selectedPeriod) return;
-
         setSelectedPeriod(period);
-        console.log(`📅 Switching to ${period} view`);
-
-        // Load new chart data for selected period
         await loadChartData(period);
+    };
+
+    const handleRefresh = async () => {
+        await loadStockData(true);
+        if (selectedPeriod) {
+            await loadChartData(selectedPeriod);
+        }
     };
 
     useEffect(() => {
@@ -320,26 +572,45 @@ export default function StockDetailScreen() {
     const priceChangePercent = globalQuote ? globalQuote['10. change percent'] : '0%';
     const isPositive = priceChange >= 0;
 
-    const renderLoadingState = () => (
-        <View style={styles.centerContainer}>
-            <View style={styles.loadingIcon}>
-                <ActivityIndicator size="large" color="#00D4AA" />
+    const renderOfflineBanner = () => {
+        if (!showOfflineBanner) return null;
+
+        return (
+            <View style={styles.offlineBanner}>
+                <Ionicons name="wifi-outline" size={16} color="#EF4444" />
+                <Text style={styles.offlineBannerText}>
+                    {isOffline ? 'No internet connection - Showing cached data' : 'Limited connectivity'}
+                </Text>
+                <Pressable onPress={() => setShowOfflineBanner(false)}>
+                    <Ionicons name="close" size={16} color="#EF4444" />
+                </Pressable>
             </View>
-            <Text style={styles.loadingText}>Loading {symbol} details...</Text>
-            <Text style={styles.loadingSubtext}>Fetching real-time data</Text>
-        </View>
+        );
+    };
+
+    const renderLoadingState = () => (
+        <StockDetailSkeleton />
     );
 
     const renderErrorState = () => (
         <View style={styles.centerContainer}>
             <View style={styles.errorIcon}>
-                <Ionicons name="alert-circle-outline" size={48} color="#FF6B6B" />
+                <Ionicons
+                    name={isOffline ? "wifi-outline" : "alert-circle-outline"}
+                    size={48}
+                    color="#FF6B6B"
+                />
             </View>
-            <Text style={styles.errorTitle}>Unable to load data</Text>
-            <Text style={styles.errorDescription}>
-                Please check your connection and try again
+            <Text style={styles.errorTitle}>
+                {isOffline ? 'No Internet Connection' : 'Unable to load data'}
             </Text>
-            <Pressable style={styles.retryButton} onPress={loadStockData}>
+            <Text style={styles.errorDescription}>
+                {isOffline
+                    ? 'Please check your internet connection and try again'
+                    : 'Please check your connection and try again'
+                }
+            </Text>
+            <Pressable style={styles.retryButton} onPress={handleRefresh}>
                 <Ionicons name="refresh" size={18} color="#FFFFFF" />
                 <Text style={styles.retryButtonText}>Try Again</Text>
             </Pressable>
@@ -384,8 +655,22 @@ export default function StockDetailScreen() {
                 </View>
             </SafeAreaView>
 
+            {/* Offline Banner */}
+            {renderOfflineBanner()}
+
             {/* Content */}
-            <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+            <ScrollView
+                style={styles.scrollView}
+                showsVerticalScrollIndicator={false}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={false}
+                        onRefresh={handleRefresh}
+                        tintColor="#00D4AA"
+                        colors={["#00D4AA"]}
+                    />
+                }
+            >
                 {loading && renderLoadingState()}
 
                 {error && !loading && renderErrorState()}
@@ -424,7 +709,6 @@ export default function StockDetailScreen() {
 
                         {/* Enhanced Chart Section */}
                         <View style={styles.chartSection}>
-                            {/* Chart Header */}
                             <View style={styles.chartHeader}>
                                 <Text style={styles.chartTitle}>Price Chart</Text>
                                 {chartLoading && (
@@ -432,7 +716,6 @@ export default function StockDetailScreen() {
                                 )}
                             </View>
 
-                            {/* Chart Container */}
                             <View style={styles.chartContainer}>
                                 {chartLoading ? (
                                     <View style={[styles.chartPlaceholder, { width: CHART_WIDTH, height: 200 }]}>
@@ -448,7 +731,7 @@ export default function StockDetailScreen() {
                                 )}
                             </View>
 
-                            {/* Functional Time Period Selector */}
+                            {/* Time Period Selector */}
                             <View style={styles.timePeriodSelector}>
                                 {(['1D', '1W', '1M', '3M', '1Y'] as TimePeriod[]).map((period) => (
                                     <Pressable
@@ -477,6 +760,7 @@ export default function StockDetailScreen() {
                                 <View style={styles.chartInfo}>
                                     <Text style={styles.chartInfoText}>
                                         Showing {chartData.length} data points for {selectedPeriod}
+                                        {isOffline ? ' (cached data)' : ''}
                                     </Text>
                                 </View>
                             )}
@@ -503,6 +787,8 @@ export default function StockDetailScreen() {
                                 )}
                             </View>
                         </View>
+
+                        // Remaining code for stock/[symbol].tsx - Metrics Section and Styles
 
                         {/* Key Metrics */}
                         <View style={styles.metricsSection}>
@@ -618,6 +904,27 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: '#F8FAFC',
     },
+
+    // Offline Banner Styles
+    offlineBanner: {
+        backgroundColor: '#FEF2F2',
+        borderBottomWidth: 1,
+        borderBottomColor: '#FECACA',
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    offlineBannerText: {
+        flex: 1,
+        fontSize: 14,
+        color: '#EF4444',
+        fontWeight: '500',
+        marginLeft: 8,
+        marginRight: 8,
+    },
+
     scrollView: {
         flex: 1,
     },
@@ -636,25 +943,6 @@ const styles = StyleSheet.create({
         marginTop: 20,
         borderRadius: 16,
         paddingVertical: 60,
-    },
-    loadingIcon: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: '#F0FDF4',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 16,
-    },
-    loadingText: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: '#1E293B',
-        marginBottom: 8,
-    },
-    loadingSubtext: {
-        fontSize: 14,
-        color: '#64748B',
     },
     errorIcon: {
         width: 80,
@@ -691,6 +979,8 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
     },
+
+    // Company Header Styles
     companyHeader: {
         backgroundColor: '#FFFFFF',
         borderRadius: 16,
@@ -761,6 +1051,8 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '500',
     },
+
+    // Chart Section Styles
     chartSection: {
         backgroundColor: '#FFFFFF',
         borderRadius: 16,
@@ -844,6 +1136,8 @@ const styles = StyleSheet.create({
         color: '#94A3B8',
         fontWeight: '500',
     },
+
+    // About Section Styles
     aboutSection: {
         backgroundColor: '#FFFFFF',
         borderRadius: 16,
@@ -887,6 +1181,8 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#15803D',
     },
+
+    // Metrics Section Styles
     metricsSection: {
         backgroundColor: '#FFFFFF',
         borderRadius: 16,
