@@ -2,6 +2,21 @@
 
 A modern React Native application for stock market tracking and portfolio management, built with Expo and TypeScript. This app provides real-time stock data, watchlist management, and comprehensive market analysis tools.
 
+
+![Simulator Screenshot - i![simulator_screenshot_B62B9575-00AC-4D06-8E47-855C0344CA62](https://github.com/user-attachments/assets/47353d48-3b59-47cc-bfed-fcad9e59562d)
+Phone 15 Pro - 2025-07-03 at 19 06 25](https://github.com/user-attachments/assets/82837c7a-fcba-4163-9c66-1b00e87a1b11)
+![simulator_screenshot_445AD550-E58A-463D-AFD6-4E8CA8B6F835](https://github.com/user-attachments/assets/9c5bc662-cc16-429f-9228-b0a904343d30)
+
+![simulator_screenshot_F7AA4691-67D7-41C6-8E4D-CFA18EBD4354](https://github.com/user-attachments/assets/272effdc-cbf5-42c7-a241-e38744c16140)
+![simulator_screenshot_F2F9DE23-7320-47DD-9820-A28C429FBC83](https://github.com/user-attachments/assets/3bba8097-b07c-4c2d-9f68-0aaf61a49330)
+![simulator_screenshot_820E84C4-888D-4F7E-A415-8F73A987E0F4](https://github.com/user-attachments/assets/67c9f295-466a-4810-b209-ce3968e39811)
+![simulator_screenshot_E77E48FA-6134-4241-B2D0-390E945089E4](https://gith![simulator_screenshot_D6453C8A-22F5-4D05-A21D-0AF4AD56C7C1](https://github.com/user-attachments/assets/39982dc5-9e49-4ba3-8879-0ee2b04bcae8)
+ub.com/user-attachments/assets/a15d90c2-ac03-4089-b112-e03576dd58f5)
+![simulator_screenshot_F69A6E07-D3F8-40A4-B212-980E51![simulator_screenshot_A46D612B-7519-4D3E-8783-B62AD7D7AC5A](https://github.com/user-attachments/assets/c4c2f221-53d6-4bfd-bedc-4e09c1db9d62)
+26C6B1](https://github.com/user-attachments/assets/79185e51-696a-4768-93de-003bbf3058e8)
+![simulator_screenshot_4A2062A3-A1E1-4FCB-B8C1-BC587B590107](https://github.com/user-attachments/assets/de12b085-fb68-4b4f-b9b8-9a98f7717c61)
+
+
 ![Froww App](https://img.shields.io/badge/React%20Native-0.79.4-blue.svg)
 ![Expo](https://img.shields.io/badge/Expo-~53.0.15-black.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-~5.8.3-blue.svg)
